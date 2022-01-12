@@ -65,6 +65,16 @@ definition, instead of calling on a preset.
 #define LED_RED_PIN                   23
 
 
+// =--------------------------------------------------------------------------= Data Structures =--=
+
+struct mqtt_settings {
+  char server[MQTT_SERVER_LENGTH];
+  char port[MQTT_PORT_LENGTH];
+  char username[MQTT_USERNAME_LENGTH];
+  char password[MQTT_PASSWORD_LENGTH];
+};
+
+
 // =----------------------------------------------------------------------------------= Globals =--=
 
 // Program
@@ -101,19 +111,21 @@ const char* rootCA = \
 char client_id[13]; // Don't forget one byte for the terminating NULL...
 
 // MQTT
-char mqtt_server[MQTT_SERVER_LENGTH] = DEFAULT_MQTT_SERVER;
-char mqtt_port[MQTT_PORT_LENGTH] = DEFAULT_MQTT_PORT;
-char mqtt_username[MQTT_USERNAME_LENGTH] = DEFAULT_MQTT_USERNAME;
-char mqtt_password[MQTT_PASSWORD_LENGTH] = DEFAULT_MQTT_PASSWORD;
+mqtt_settings mqttSettings = {
+  DEFAULT_MQTT_SERVER,
+  DEFAULT_MQTT_PORT,
+  DEFAULT_MQTT_USERNAME,
+  DEFAULT_MQTT_PASSWORD
+};
 int connectionAttempts = 0;
 
 // Wifi
 WiFiClientSecure wifiClient;
 WiFiManager wifiManager;
-WiFiManagerParameter config_mqtt_server("server", "MQTT Server", mqtt_server, MQTT_SERVER_LENGTH);
-WiFiManagerParameter config_mqtt_port("port", "MQTT Port", mqtt_port, MQTT_PORT_LENGTH);
-WiFiManagerParameter config_mqtt_username("username", "MQTT Username", mqtt_username, MQTT_USERNAME_LENGTH);
-WiFiManagerParameter config_mqtt_password("password", "MQTT Password", mqtt_password, MQTT_PASSWORD_LENGTH);
+WiFiManagerParameter config_mqtt_server("server", "MQTT Server", mqttSettings.server, MQTT_SERVER_LENGTH);
+WiFiManagerParameter config_mqtt_port("port", "MQTT Port", mqttSettings.port, MQTT_PORT_LENGTH);
+WiFiManagerParameter config_mqtt_username("username", "MQTT Username", mqttSettings.username, MQTT_USERNAME_LENGTH);
+WiFiManagerParameter config_mqtt_password("password", "MQTT Password", mqttSettings.password, MQTT_PASSWORD_LENGTH);
 bool wifiFeaturesEnabled = false;
 PubSubClient mqttClient(wifiClient);
 
@@ -269,8 +281,8 @@ void setupMQTT() {
     mqttClient.disconnect();
   }
 
-  int port = atoi(mqtt_port);
-  mqttClient.setServer(mqtt_server, port);
+  int port = atoi(mqttSettings.port);
+  mqttClient.setServer(mqttSettings.server, port);
   mqttClient.setCallback(mqttCallback);
   connectionAttempts = 0;
 }
@@ -284,12 +296,12 @@ void loopMQTT() {
 void mqttConnect() {
   // Loop until we're reconnected
   while (!mqttClient.connected()) {
-    Serial.printf("MQTT Server: %s@%s:%s\n", mqtt_username, mqtt_server, mqtt_port);
+    Serial.printf("MQTT Server: %s@%s:%s\n", mqttSettings.username, mqttSettings.server, mqttSettings.port);
     Serial.print("Attempting MQTT connection... ");
     setProgram(PROGRAM_MQTT_CONNECTING);
 
     // Attempt to connect
-    if (mqttClient.connect(client_id, mqtt_username, mqtt_password)) {
+    if (mqttClient.connect(client_id, mqttSettings.username, mqttSettings.password)) {
       Serial.println("connected");
       setProgram(PROGRAM_USER);
 
@@ -391,17 +403,17 @@ void saveConfigCallback() {
   Serial.println("Saving config values");
 
   // Read updated parameters
-  strcpy(mqtt_server, config_mqtt_server.getValue());
-  strcpy(mqtt_port, config_mqtt_port.getValue());
-  strcpy(mqtt_username, config_mqtt_username.getValue());
-  strcpy(mqtt_password, config_mqtt_password.getValue());
+  strcpy(mqttSettings.server, config_mqtt_server.getValue());
+  strcpy(mqttSettings.port, config_mqtt_port.getValue());
+  strcpy(mqttSettings.username, config_mqtt_username.getValue());
+  strcpy(mqttSettings.password, config_mqtt_password.getValue());
 
   Serial.println("Saving config...");
   DynamicJsonDocument jsonDocument(1000);
-  jsonDocument["mqtt_server"] = mqtt_server;
-  jsonDocument["mqtt_port"] = mqtt_port;
-  jsonDocument["mqtt_username"] = mqtt_username;
-  jsonDocument["mqtt_password"] = mqtt_password;
+  jsonDocument["mqtt_server"] = mqttSettings.server;
+  jsonDocument["mqtt_port"] = mqttSettings.port;
+  jsonDocument["mqtt_username"] = mqttSettings.username;
+  jsonDocument["mqtt_password"] = mqttSettings.password;
 
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile) {
@@ -462,10 +474,10 @@ void setupFileSystem() {
         if (!error) {
           Serial.println("\nParsed json");
 
-          strcpy(mqtt_server, settingsDocument["mqtt_server"]);
-          strcpy(mqtt_port, settingsDocument["mqtt_port"]);
-          strcpy(mqtt_username, settingsDocument["mqtt_username"]);
-          strcpy(mqtt_password, settingsDocument["mqtt_password"]);
+          strcpy(mqttSettings.server, settingsDocument["mqtt_server"]);
+          strcpy(mqttSettings.port, settingsDocument["mqtt_port"]);
+          strcpy(mqttSettings.username, settingsDocument["mqtt_username"]);
+          strcpy(mqttSettings.password, settingsDocument["mqtt_password"]);
         } else {
           Serial.println("Failed to load json config");
         }
