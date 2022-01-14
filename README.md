@@ -32,6 +32,16 @@ The JSON format for pattern definitions is as follows:
 
 To specify a `delay` value is "indefinite", use the value `-1`. If a pattern is set as indefinite, the `next_preset` value is ignored and may be set to an empty string.
 
+## Hardware
+
+Below are the key pieces of hardware required to build this, as well as product links to the specific ones I used:
+
+- 12v red-amber-green stack light [Amazon](https://www.amazon.com/gp/product/B086WSHZKV/)
+- ESP32 dev board [Amazon](https://www.amazon.com/gp/product/B08PNWB81Z/)
+- TIP120 Darlington transistors
+- Protoboard (TBD)
+- Enclosure (3D Model TBD)
+
 ## License
 
 This code is released under the MIT License.
