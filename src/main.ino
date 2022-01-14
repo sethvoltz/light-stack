@@ -12,18 +12,18 @@ configuration for MQTT server, port and credentials.
 
 The display runs on the concept of a program, which is a hard coded runtime of actions for the LED
 stack. Within this, there are programs meant to control what is going on with the system itself
-(e.g. wifi, connections, errors, etc) and the actual user-driven state from the network. To ease
-usage of the light stack, there is also a concept of presets. For the user-driven program, a second
-set of parameters is able to be provided to declare which of the lights are enabled, whether they
-are animating (e.g. blinking), if there is a count or timeout, and if they go to another preset
-after a given time. The presets are just hard coded definitions of these actions, which are loaded
-in at the time the user sets them, overriding any active set, and the user may also pass a full
-definition, instead of calling on a preset.
+(e.g. wifi, connections, errors, etc) and the actual user-driven pattern from the network. To ease
+usage of the light stack, there are also a set of preset patterns. For the user-driven program, a
+second set of parameters is able to be provided to declare a sequence of light states with delays,
+and if they go to another preset after a given time. The presets are just hard coded definitions of
+these actions, which are loaded in at the time the user sets them, overriding any active set, and
+the user may also pass a full definition, instead of calling on a preset.
 
 =-----------------------------------------------------------------------------------------------= */
 
 // =--------------------------------------------------------------------------------= Libraries =--=
 
+#include <limits.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiManager.h>
@@ -55,6 +55,7 @@ definition, instead of calling on a preset.
 #define MQTT_USERNAME_LENGTH          32
 #define DEFAULT_MQTT_PASSWORD         ""
 #define MQTT_PASSWORD_LENGTH          32
+#define MQTT_MESSAGE_BUFFER_SIZE      3072
 
 // Buttons
 #define MAIN_BUTTON_PIN               26
@@ -63,9 +64,37 @@ definition, instead of calling on a preset.
 #define LED_GREEN_PIN                 18
 #define LED_AMBER_PIN                 19
 #define LED_RED_PIN                   23
+#define PATTERN_ELEMENT_MAX           32
 
 
 // =--------------------------------------------------------------------------= Data Structures =--=
+
+/* Examples for `stack_pattern currentUserPattern = ...`
+  Static Green    - {{{false, false, true, ULONG_MAX}}, 1, ULONG_MAX, 0}
+  Blink Amber     - {{{false, true, false, 500}, {false, false, false, 500}}, 2, ULONG_MAX, 0}
+  Chase           - {{{true, false, false, 200}, {false, true, false, 200}, {false, false, true, 200}}, 3, ULONG_MAX, 0}
+  3xBlink -> Off  - {{{false, false, true, 120}, {false, false, false, 120}}, 2, 720, 0} // preset 0 is off
+*/
+
+struct pattern_element {
+  bool red_state;
+  bool amber_state;
+  bool green_state;
+  unsigned long delay_ms; // Use ULONG_MAX for indefinite
+};
+
+struct stack_pattern {
+  pattern_element elements[PATTERN_ELEMENT_MAX];
+  uint8_t num_elements; // Count of elements, up to PATTERN_ELEMENT_MAX
+  unsigned long delay_ms; // Use ULONG_MAX for indefinite
+  uint8_t next_preset; // Ignored if delay_ms is ULONG_MAX
+};
+
+struct stack_state {
+  uint8_t current_element; // Array index for stack_pattern.elements
+  unsigned long last_element_at;
+  unsigned long pattern_start_at;
+};
 
 struct mqtt_settings {
   char server[MQTT_SERVER_LENGTH];
@@ -75,15 +104,105 @@ struct mqtt_settings {
 };
 
 
+// =---------------------------------------------------------------------------------= Programs =--=
+
+void setProgram(uint8_t program);
+void programOff(bool init);
+void programWifiConnecting(bool init);
+void programWifiHotspot(bool init);
+void programWifiError(bool init);
+void programMqttConnecting(bool init);
+void programMqttError(bool init);
+void programUser(bool init);
+
+void (*renderFunc[])(bool init) {
+  programOff,
+  programWifiConnecting,
+  programWifiHotspot,
+  programWifiError,
+  programMqttConnecting,
+  programMqttError,
+  programUser
+};
+#define PROGRAM_COUNT (sizeof(renderFunc) / sizeof(renderFunc[0]))
+
+const char *programNames[] = {
+  "off",
+  "wifi-connecting",
+  "wifi-hotspot",
+  "wifi-error",
+  "mqtt-connecting",
+  "mqtt-error",
+  "user"
+};
+
+enum programs {
+  PROGRAM_OFF,
+  PROGRAM_WIFI_CONNECTING,
+  PROGRAM_WIFI_HOTSPOT,
+  PROGRAM_WIFI_ERROR,
+  PROGRAM_MQTT_CONNECTING,
+  PROGRAM_MQTT_ERROR,
+  PROGRAM_USER
+};
+
+
+// =----------------------------------------------------------------------------------= Presets =--=
+
+const stack_pattern presetList[] = {
+  {{{false, false, false, ULONG_MAX}}, 1, ULONG_MAX, 0},
+  {{{false, false, true, ULONG_MAX}}, 1, ULONG_MAX, 0},
+  {{{false, false, true, 1000}, {false, false, false, 1000}}, 2, ULONG_MAX, 0},
+  {{{false, true, false, ULONG_MAX}}, 1, ULONG_MAX, 0},
+  {{{false, true, false, 1000}, {false, false, false, 1000}}, 2, ULONG_MAX, 0},
+  {{{true, false, false, ULONG_MAX}}, 1, ULONG_MAX, 0},
+  {{{true, false, false, 1000}, {false, false, false, 1000}}, 2, ULONG_MAX, 0},
+  {{{true, false, false, 350}, {false, true, false, 350}, {false, false, true, 350}}, 3, ULONG_MAX, 0},
+  {{{true, false, false, 200}, {false, true, false, 200}, {false, false, true, 200}, {false, true, false, 200}}, 4, ULONG_MAX, 0},
+  {{{true, true, true, ULONG_MAX}}, 1, ULONG_MAX, 0}
+};
+#define PRESET_COUNT (sizeof(presetList) / sizeof(presetList[0]))
+
+const char *presetNames[] = {
+  "off",
+  "green",
+  "green-blink",
+  "amber",
+  "amber-blink",
+  "red",
+  "red-blink",
+  "chase",
+  "cylon",
+  "all"
+};
+
+enum presets {
+  PRESET_OFF,
+  PRESET_GREEN,
+  PRESET_GREEN_BLINK,
+  PRESET_AMBER,
+  PRESET_AMBER_BLINK,
+  PRESET_RED,
+  PRESET_RED_BLINK,
+  PRESET_CHASE,
+  PRESET_CYLON,
+  PRESET_ALL
+};
+
+
 // =----------------------------------------------------------------------------------= Globals =--=
 
 // Program
 uint8_t currentProgram = 0;
 
+// Patterns & Preset
+stack_pattern currentUserPattern = presetList[PRESET_OFF];
+
 // Save data flag for setup config
 bool shouldSaveConfig = false;
 
 // HTTP
+// TODO: Allow certificate to be configured in wifiManager
 // Amazon Root CA
 const char* rootCA = \
 "-----BEGIN CERTIFICATE-----\n" \
@@ -133,65 +252,6 @@ PubSubClient mqttClient(wifiClient);
 OneButton mainButton(MAIN_BUTTON_PIN, true);
 
 
-// =---------------------------------------------------------------------------------= Programs =--=
-
-void setProgram(uint8_t program);
-void programOff(bool first);
-void programWifiConnecting(bool first);
-void programWifiHotspot(bool first);
-void programWifiError(bool first);
-void programMqttConnecting(bool first);
-void programMqttError(bool first);
-void programUser(bool first);
-
-void (*renderFunc[])(bool first) {
-  programOff,
-  programWifiConnecting,
-  programWifiHotspot,
-  programWifiError,
-  programMqttConnecting,
-  programMqttError,
-  programUser
-};
-#define PROGRAM_COUNT (sizeof(renderFunc) / sizeof(renderFunc[0]))
-
-const char *programNames[] = {
-  "off",
-  "wifi-connecting",
-  "wifi-hotspot",
-  "wifi-error",
-  "mqtt-connecting",
-  "mqtt-error",
-  "user"
-};
-
-enum programs {
-  PROGRAM_OFF,
-  PROGRAM_WIFI_CONNECTING,
-  PROGRAM_WIFI_HOTSPOT,
-  PROGRAM_WIFI_ERROR,
-  PROGRAM_MQTT_CONNECTING,
-  PROGRAM_MQTT_ERROR,
-  PROGRAM_USER
-};
-
-
-// =----------------------------------------------------------------------------------= Presets =--=
-
-// TODO: Figure out data structure for the definitions - enabled LEDs, animation, timing, next definition or program, etc
-#define PRESET_COUNT 8 // TODO: Replace this with auto-calc
-const char *presetNames[] = {
-  "off",
-  "green",
-  "green-blink",
-  "amber",
-  "amber-blink",
-  "red",
-  "red-blink",
-  "all"
-};
-
-
 // =--------------------------------------------------------------------------------= Utilities =--=
 
 void setupClientId() {
@@ -222,32 +282,85 @@ void setupRandom() {
 
 // =----------------------------------------------------------------------------------= Display =--=
 
-void programOff(bool first) {
-  // TODO: Turn all LEDs off and hold
+void setLights(pattern_element element) {
+  Serial.printf("Light State: (%s) (%s) (%s)\n", element.red_state ? "R" : "_", element.amber_state ? "A" : "_", element.green_state ? "G" : "_");
+  digitalWrite(LED_RED_PIN, element.red_state);
+  digitalWrite(LED_AMBER_PIN, element.amber_state);
+  digitalWrite(LED_GREEN_PIN, element.green_state);
 }
 
-void programWifiConnecting(bool first) {
-  // TODO: Sequence LEDs green, amber, red, loop
+void runPattern(stack_pattern pattern, stack_state& state, bool init = false) {
+  unsigned long now = millis();
+  
+  if (init) {
+    state = {0, now, now};
+    setLights(pattern.elements[0]);
+    return; // Return early to avoid infinite loop from malformed pattern delay
+  }
+
+  pattern_element element = pattern.elements[state.current_element];
+  unsigned long elementDelay = element.delay_ms;
+  unsigned long patternDelay = pattern.delay_ms;
+
+  // Check for whether to move to the next pattern
+  if (elementDelay != ULONG_MAX && now - state.last_element_at > elementDelay) {
+    state.current_element++;
+    if (state.current_element >= pattern.num_elements) {
+      state.current_element = 0;
+    }
+
+    state.last_element_at = now;
+
+    setLights(pattern.elements[state.current_element]);
+  }
+
+  // Check whether to change pattern
+  if (patternDelay != ULONG_MAX && now - state.pattern_start_at > patternDelay) {
+    if (isValidPresetId(pattern.next_preset)) {
+      setPreset(pattern.next_preset);
+    }
+  }
 }
 
-void programWifiHotspot(bool first) {
-  // TODO: Sequence LEDs green, amber, loop
+void programOff(bool init) {
+  static stack_state state;
+  const stack_pattern pattern = {{{false, false, false, ULONG_MAX}}, 1, ULONG_MAX, 0};
+  runPattern(pattern, state, init);
 }
 
-void programWifiError(bool first) {
-  // TODO: Green and amber on, blink red
+void programWifiConnecting(bool init) {
+  static stack_state state;
+  const stack_pattern pattern = {{{true, false, false, 350}, {false, true, false, 350}, {false, false, true, 350}}, 3, ULONG_MAX, 0};
+  runPattern(pattern, state, init);
 }
 
-void programMqttConnecting(bool first) {
-  // TODO: Amber on, blink green
+void programWifiHotspot(bool init) {
+  static stack_state state;
+  const stack_pattern pattern = {{{false, true, false, 350}, {false, false, true, 350}}, 2, ULONG_MAX, 0};
+  runPattern(pattern, state, init);
 }
 
-void programMqttError(bool first) {
-  // TODO: Amber on, blink red
+void programWifiError(bool init) {
+  static stack_state state;
+  const stack_pattern pattern = {{{true, true, true, 200}, {false, true, true, 200}}, 2, ULONG_MAX, 0};
+  runPattern(pattern, state, init);
 }
 
-void programUser(bool first) {
-  // TODO: Run definition program
+void programMqttConnecting(bool init) {
+  static stack_state state;
+  const stack_pattern pattern = {{{false, true, true, 500}, {false, true, false, 500}}, 2, ULONG_MAX, 0};
+  runPattern(pattern, state, init);
+}
+
+void programMqttError(bool init) {
+  static stack_state state;
+  const stack_pattern pattern = {{{true, true, false, 200}, {false, true, false, 200}}, 2, ULONG_MAX, 0};
+  runPattern(pattern, state, init);
+}
+
+void programUser(bool init) {
+  static stack_state state;
+  runPattern(currentUserPattern, state, init);
 }
 
 
@@ -274,6 +387,7 @@ bool topicMatch(String topic, String suffix) {
 // =-------------------------------------------------------------------------------------= MQTT =--=
 
 void setupMQTT() {
+  // TODO: Get CA certs working
   // wifiClient.setCACert(rootCA);
   wifiClient.setInsecure();
 
@@ -284,6 +398,7 @@ void setupMQTT() {
   int port = atoi(mqttSettings.port);
   mqttClient.setServer(mqttSettings.server, port);
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(MQTT_MESSAGE_BUFFER_SIZE);
   connectionAttempts = 0;
 }
 
@@ -376,7 +491,7 @@ void loopButton() {
 
 // =-------------------------------------------------------------------------------------= WIFI =--=
 
-// Finishing steps for after wifi may be complete
+// Finishing steps for wifi
 void finalizeWifi() {
   if (WiFi.status() != WL_CONNECTED){
     wifiFeaturesEnabled = false;
@@ -387,14 +502,12 @@ void finalizeWifi() {
   }
 }
 
-// gets called when WiFiManager enters configuration mode
+// Gets called when WiFiManager enters configuration mode
 void configModeCallback(WiFiManager *myWiFiManager) {
   setProgram(PROGRAM_WIFI_HOTSPOT);
 
   Serial.print("Entered config mode... ");
   Serial.println(WiFi.softAPIP());
-
-  // if you used auto generated SSID, print it
   Serial.println(myWiFiManager->getConfigPortalSSID());
 }
 
@@ -492,15 +605,25 @@ void setupFileSystem() {
 // =----------------------------------------------------------------------------------= Display =--=
 
 void setupDisplay() {
-  // TODO: Init pins for LEDs and set output
+  pinMode(LED_RED_PIN, OUTPUT);
+  pinMode(LED_AMBER_PIN, OUTPUT);
+  pinMode(LED_GREEN_PIN, OUTPUT);
+
+  digitalWrite(LED_RED_PIN, 0);
+  digitalWrite(LED_AMBER_PIN, 0);
+  digitalWrite(LED_GREEN_PIN, 0);
 }
 
-void loopDisplay(bool first = false) {
-  (*renderFunc[currentProgram])(first);
+void loopDisplay(bool init = false) {
+  (*renderFunc[currentProgram])(init);
+}
+
+bool isValidProgramId(uint8_t program) {
+  return program >= 0 && program < PROGRAM_COUNT;
 }
 
 void setProgram(uint8_t program) {
-  if (program >= 0 && program < PROGRAM_COUNT && program != currentProgram) {
+  if (isValidProgramId(program) && program != currentProgram) {
     currentProgram = program;
     Serial.printf("Setting program to %s\n", programNames[program]);
     loopDisplay(true);
@@ -516,27 +639,78 @@ void setProgram(String programName) {
   }
 }
 
+bool isValidPresetId(uint8_t preset) {
+  return preset >= 0 && preset < PRESET_COUNT;
+}
+
+int getPresetId(const char *presetName) {
+  for (uint8_t preset = 0; preset < PRESET_COUNT; preset++) {
+    if (strcmp(presetName, presetNames[preset]) == 0) {
+      return preset;
+    }
+  }
+  return -1;
+}
+
 void setPreset(uint8_t preset) {
-  if (preset >= 0 && preset < PRESET_COUNT) {
+  if (isValidPresetId(preset)) {
     Serial.printf("Setting preset to %s\n", presetNames[preset]);
-    // TODO: Replace current definition with the preset's value
+    currentUserPattern = presetList[preset];
+    loopDisplay(true);
   }
 }
 
 void setPreset(String presetName) {
-  for (uint8_t preset = 0; preset < PROGRAM_COUNT; preset++) {
-    if (presetName.equals(presetNames[preset])) {
-      setProgram(preset);
-      break;
-    }
-  }
+  int preset = getPresetId(presetName.c_str());
+  if (preset >= 0) setPreset(preset);
 }
 
 void setDefinition(String definition) {
   Serial.println("New Definition:");
   Serial.println(definition);
-  // TODO: Parse definition as JSON, validate required format and set definition values
-}
+
+  DynamicJsonDocument doc(MQTT_MESSAGE_BUFFER_SIZE);
+  DeserializationError error = deserializeJson(doc, definition);
+
+  if (error) {
+    Serial.print("Error deserializing JSON: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  stack_pattern pattern;
+
+  uint8_t index = 0;
+  for (JsonObject element : doc["elements"].as<JsonArray>()) {
+    pattern.elements[index].red_state = element["red"];
+    pattern.elements[index].amber_state = element["amber"];
+    pattern.elements[index].green_state = element["green"];
+    pattern.elements[index].delay_ms = element["delay"] == -1 ? ULONG_MAX : element["delay"];
+    index++;
+
+    if (index > PATTERN_ELEMENT_MAX) {
+      Serial.println("Too many pattern elements! Cancelling.");
+      return;
+    }
+  }
+
+  pattern.num_elements = index;
+  if (doc["delay"] == -1) {
+    pattern.delay_ms = ULONG_MAX;
+    pattern.next_preset = 0;
+  } else {
+    pattern.delay_ms = doc["delay"];
+    int preset = getPresetId(doc["next_preset"]);
+    if (preset < 0) {
+      Serial.println("Unknown preset! Cancelling.");
+      return;
+    }
+    pattern.next_preset = preset;
+  }
+
+  currentUserPattern = pattern;
+  loopDisplay(true);
+} 
 
 
 /*=----------------------------------------------------------------------------= Main Runtime =--=*/
