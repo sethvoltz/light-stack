@@ -1,26 +1,3 @@
-/* =------------------------------------------------------------------------------= Description =--=
-
-The Light Stack firmware is meant to drive a simple industrial-style light stack with three lights,
-red, orange/amber, and green and expose those controls over MQTT.
-
-The controls are exposed in two ways: preset programs to set all the lights to the correct state or
-animation, and a manual control that sets the program to "custom" and allows for the lights to be
-set explicitely. Also exposed are fetch commands to publish the current state of the light stack.
-
-The firmware, being designed for the ESP32 chipset, also exposes wifi hotspot setup and
-configuration for MQTT server, port and credentials.
-
-The display runs on the concept of a program, which is a hard coded runtime of actions for the LED
-stack. Within this, there are programs meant to control what is going on with the system itself
-(e.g. wifi, connections, errors, etc) and the actual user-driven pattern from the network. To ease
-usage of the light stack, there are also a set of preset patterns. For the user-driven program, a
-second set of parameters is able to be provided to declare a sequence of light states with delays,
-and if they go to another preset after a given time. The presets are just hard coded definitions of
-these actions, which are loaded in at the time the user sets them, overriding any active set, and
-the user may also pass a full definition, instead of calling on a preset.
-
-=-----------------------------------------------------------------------------------------------= */
-
 // =--------------------------------------------------------------------------------= Libraries =--=
 
 #include <limits.h>
@@ -64,7 +41,7 @@ the user may also pass a full definition, instead of calling on a preset.
 #define LED_GREEN_PIN                 18
 #define LED_AMBER_PIN                 19
 #define LED_RED_PIN                   23
-#define PATTERN_ELEMENT_MAX           32
+#define PATTERN_FRAME_MAX             32
 
 
 // =--------------------------------------------------------------------------= Data Structures =--=
@@ -76,7 +53,7 @@ the user may also pass a full definition, instead of calling on a preset.
   3xBlink -> Off  - {{{false, false, true, 120}, {false, false, false, 120}}, 2, 720, 0} // preset 0 is off
 */
 
-struct pattern_element {
+struct pattern_frame {
   bool red_state;
   bool amber_state;
   bool green_state;
@@ -84,15 +61,15 @@ struct pattern_element {
 };
 
 struct stack_pattern {
-  pattern_element elements[PATTERN_ELEMENT_MAX];
-  uint8_t num_elements; // Count of elements, up to PATTERN_ELEMENT_MAX
+  pattern_frame frames[PATTERN_FRAME_MAX];
+  uint8_t num_frames; // Count of frames, up to PATTERN_FRAME_MAX
   unsigned long delay_ms; // Use ULONG_MAX for indefinite
   uint8_t next_preset; // Ignored if delay_ms is ULONG_MAX
 };
 
 struct stack_state {
-  uint8_t current_element; // Array index for stack_pattern.elements
-  unsigned long last_element_at;
+  uint8_t current_frame; // Array index for stack_pattern.frames
+  unsigned long last_frame_at;
   unsigned long pattern_start_at;
 };
 
@@ -282,11 +259,11 @@ void setupRandom() {
 
 // =----------------------------------------------------------------------------------= Display =--=
 
-void setLights(pattern_element element) {
-  Serial.printf("Light State: (%s) (%s) (%s)\n", element.red_state ? "R" : "_", element.amber_state ? "A" : "_", element.green_state ? "G" : "_");
-  digitalWrite(LED_RED_PIN, element.red_state);
-  digitalWrite(LED_AMBER_PIN, element.amber_state);
-  digitalWrite(LED_GREEN_PIN, element.green_state);
+void setLights(pattern_frame frame) {
+  Serial.printf("Light State: (%s) (%s) (%s)\n", frame.red_state ? "R" : "_", frame.amber_state ? "A" : "_", frame.green_state ? "G" : "_");
+  digitalWrite(LED_RED_PIN, frame.red_state);
+  digitalWrite(LED_AMBER_PIN, frame.amber_state);
+  digitalWrite(LED_GREEN_PIN, frame.green_state);
 }
 
 void runPattern(stack_pattern pattern, stack_state& state, bool init = false) {
@@ -294,24 +271,24 @@ void runPattern(stack_pattern pattern, stack_state& state, bool init = false) {
   
   if (init) {
     state = {0, now, now};
-    setLights(pattern.elements[0]);
+    setLights(pattern.frames[0]);
     return; // Return early to avoid infinite loop from malformed pattern delay
   }
 
-  pattern_element element = pattern.elements[state.current_element];
-  unsigned long elementDelay = element.delay_ms;
+  pattern_frame frame = pattern.frames[state.current_frame];
+  unsigned long frameDelay = frame.delay_ms;
   unsigned long patternDelay = pattern.delay_ms;
 
   // Check for whether to move to the next pattern
-  if (elementDelay != ULONG_MAX && now - state.last_element_at > elementDelay) {
-    state.current_element++;
-    if (state.current_element >= pattern.num_elements) {
-      state.current_element = 0;
+  if (frameDelay != ULONG_MAX && now - state.last_frame_at > frameDelay) {
+    state.current_frame++;
+    if (state.current_frame >= pattern.num_frames) {
+      state.current_frame = 0;
     }
 
-    state.last_element_at = now;
+    state.last_frame_at = now;
 
-    setLights(pattern.elements[state.current_element]);
+    setLights(pattern.frames[state.current_frame]);
   }
 
   // Check whether to change pattern
@@ -679,20 +656,20 @@ void setDefinition(String definition) {
   stack_pattern pattern;
 
   uint8_t index = 0;
-  for (JsonObject element : doc["elements"].as<JsonArray>()) {
-    pattern.elements[index].red_state = element["red"];
-    pattern.elements[index].amber_state = element["amber"];
-    pattern.elements[index].green_state = element["green"];
-    pattern.elements[index].delay_ms = element["delay"] == -1 ? ULONG_MAX : element["delay"];
+  for (JsonObject frame : doc["frames"].as<JsonArray>()) {
+    pattern.frames[index].red_state = frame["red"];
+    pattern.frames[index].amber_state = frame["amber"];
+    pattern.frames[index].green_state = frame["green"];
+    pattern.frames[index].delay_ms = frame["delay"] == -1 ? ULONG_MAX : frame["delay"];
     index++;
 
-    if (index > PATTERN_ELEMENT_MAX) {
-      Serial.println("Too many pattern elements! Cancelling.");
+    if (index > PATTERN_FRAME_MAX) {
+      Serial.println("Too many pattern frames! Cancelling.");
       return;
     }
   }
 
-  pattern.num_elements = index;
+  pattern.num_frames = index;
   if (doc["delay"] == -1) {
     pattern.delay_ms = ULONG_MAX;
     pattern.next_preset = 0;
