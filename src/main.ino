@@ -316,9 +316,7 @@ void runPattern(stack_pattern pattern, stack_state& state, bool init = false) {
 
   // Check whether to change pattern
   if (patternDelay != ULONG_MAX && now - state.pattern_start_at > patternDelay) {
-    if (isValidPresetId(pattern.next_preset)) {
-      setPreset(pattern.next_preset);
-    }
+    setPreset(isValidPresetId(pattern.next_preset) ? pattern.next_preset : PRESET_OFF);
   }
 }
 
