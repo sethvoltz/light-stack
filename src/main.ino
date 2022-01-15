@@ -1,5 +1,5 @@
 // TODO: OTA Firmware updates
-// TODO: Echo or fetch current pattern out to MQTT (convert to JSON
+// TODO: Echo or fetch current pattern out to MQTT (convert to JSON)
 // TODO: Improve JSON schema. Check for missing `frames` param, allow missing `delay` to mean indef.
 
 // =--------------------------------------------------------------------------------= Libraries =--=
@@ -23,6 +23,8 @@
 #define WIFI_HOTSPOT_TIMEOUT          180 // Seconds before hotspot ends and attempts reconnect
 
 // MQTT
+#define MQTT_ONLINE_MESSAGE           "online"
+#define MQTT_OFFLINE_MESSAGE          "offline"
 #define MAX_CONNECTION_ATTEMPTS       3 // Number of attempts before fallback
 #define SHORT_CONNECTION_DELAY        3000 // ms Delay between initial connection attempts
 #define LONG_CONNECTION_DELAY         120000 // ms Delay between attempts after max attempts
@@ -395,7 +397,15 @@ void mqttConnect() {
     setProgram(PROGRAM_MQTT_CONNECTING);
 
     // Attempt to connect
-    if (mqttClient.connect(client_id, mqttSettings.username, mqttSettings.password)) {
+    if (mqttClient.connect(
+      client_id,                                  // Unique ID
+      mqttSettings.username,                      // Credentials
+      mqttSettings.password,
+      makeTopic("identity").c_str(),              // Last Will & Testament
+      1,
+      true,
+      MQTT_OFFLINE_MESSAGE
+    )) {
       Serial.println("connected");
       setProgram(PROGRAM_USER);
 
@@ -439,7 +449,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void sendIdentity() {
-  mqttClient.publish(makeTopic("identity").c_str(), "online");
+  mqttClient.publish(
+    makeTopic("identity").c_str(),
+    (const uint8_t*) MQTT_ONLINE_MESSAGE,
+    strlen(MQTT_ONLINE_MESSAGE),
+    true
+  );
 }
 
 
