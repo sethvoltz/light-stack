@@ -35,7 +35,7 @@
 #define MQTT_MESSAGE_BUFFER_SIZE      3072
 
 // Buttons
-#define MAIN_BUTTON_PIN               26
+#define MAIN_BUTTON_PIN               22
 
 // Display
 #define LED_GREEN_PIN                 18
