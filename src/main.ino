@@ -1,3 +1,7 @@
+// TODO: OTA Firmware updates
+// TODO: Echo or fetch current pattern out to MQTT (convert to JSON
+// TODO: Improve JSON schema. Check for missing `frames` param, allow missing `delay` to mean indef.
+
 // =--------------------------------------------------------------------------------= Libraries =--=
 
 #include <limits.h>
