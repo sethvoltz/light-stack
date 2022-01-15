@@ -38,8 +38,14 @@ Below are the key pieces of hardware required to build this, as well as product 
 
 - 12v red-amber-green stack light [Amazon](https://www.amazon.com/gp/product/B086WSHZKV/)
 - ESP32 dev board [Amazon](https://www.amazon.com/gp/product/B08PNWB81Z/)
-- TIP120 Darlington transistors
+- N-Channel MOSFET transistor (I used the IRF640)
+- Buck Converter (to drop 12v in to 5v for the ESP)
+- Wire sockets (TBD)
 - Protoboard (TBD)
+- 2x10 .1" female headers
+- 2x10 .1" male headers
+- Power barrel jack
+- Wire
 - Enclosure (3D Model TBD)
 
 ## License
