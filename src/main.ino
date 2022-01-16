@@ -1,4 +1,3 @@
-// TODO: OTA Firmware updates
 // TODO: Echo or fetch current pattern out to MQTT (convert to JSON)
 // TODO: Improve JSON schema. Check for missing `frames` param, allow missing `delay` to mean indef.
 
@@ -8,6 +7,9 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiManager.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 #include <FS.h>
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
@@ -185,6 +187,7 @@ stack_pattern currentUserPattern = presetList[PRESET_OFF];
 bool shouldSaveConfig = false;
 
 // HTTP
+AsyncWebServer webServer(80);
 // TODO: Allow certificate to be configured in wifiManager
 // Amazon Root CA
 const char* rootCA = \
@@ -266,7 +269,7 @@ void setupRandom() {
 // =----------------------------------------------------------------------------------= Display =--=
 
 void setLights(pattern_frame frame) {
-  Serial.printf("Light State: (%s) (%s) (%s)\n", frame.red_state ? "R" : "_", frame.amber_state ? "A" : "_", frame.green_state ? "G" : "_");
+  // Serial.printf("Light State: (%s) (%s) (%s)\n", frame.red_state ? "R" : "_", frame.amber_state ? "A" : "_", frame.green_state ? "G" : "_");
   digitalWrite(LED_RED_PIN, frame.red_state);
   digitalWrite(LED_AMBER_PIN, frame.amber_state);
   digitalWrite(LED_GREEN_PIN, frame.green_state);
@@ -475,7 +478,7 @@ void setupButton() {
   pinMode(MAIN_BUTTON_PIN, INPUT_PULLUP);
 
   mainButton.attachClick(buttonClick);
-  // mainButton.attachLongPressStart(buttonLongPress);
+  mainButton.attachLongPressStart(buttonLongPress);
 }
 
 void loopButton() {
@@ -707,6 +710,18 @@ void setDefinition(String definition) {
 } 
 
 
+/*=-------------------------------------------------------------------------------------= OTA =--=*/
+
+void setupOTA() {
+  webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/plain", "Hi! I am ESP32.");
+  });
+  AsyncElegantOTA.begin(&webServer);
+  webServer.begin();
+  Serial.println("HTTP server started.");
+}
+
+
 /*=----------------------------------------------------------------------------= Main Runtime =--=*/
 
 void setup() {
@@ -718,6 +733,7 @@ void setup() {
   setupButton();
   setupDisplay();
   setupWifi();
+  setupOTA();
   setupMQTT();
 }
 
