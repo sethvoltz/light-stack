@@ -484,8 +484,7 @@ void buttonClick() {
 
 void buttonLongPress() {
   Serial.println("Button Long Press Start");
-  wifiManager.startConfigPortal(captivePortalWifiName().c_str(), SETUP_AP_PASSWORD);
-  finalizeWifi();
+  finalizeWifi(wifiManager.startConfigPortal(captivePortalWifiName().c_str(), SETUP_AP_PASSWORD));
 }
 
 void setupButton() {
@@ -503,13 +502,13 @@ void loopButton() {
 // =-------------------------------------------------------------------------------------= WIFI =--=
 
 // Finishing steps for wifi
-void finalizeWifi() {
-  if (WiFi.status() != WL_CONNECTED){
-    wifiFeaturesEnabled = false;
-    Serial.print("Failed to connect to wifi. ");
-    setProgram(PROGRAM_WIFI_ERROR);
-  } else {
+void finalizeWifi(boolean connectStatus) {
+  if (connectStatus) {
     wifiFeaturesEnabled = true;
+  } else {
+    wifiFeaturesEnabled = false;
+    Serial.println("Failed to connect to wifi and hit timeout.");
+    setProgram(PROGRAM_WIFI_ERROR);
   }
 }
 
@@ -570,12 +569,10 @@ void setupWifi() {
   wifiManager.setConfigPortalBlocking(false);
   wifiManager.setAPCallback(configModeCallback);
   wifiManager.setSaveConfigCallback(saveConfigCallback);
+  wifiManager.setDarkMode(true);
 
-  if (wifiManager.autoConnect(captivePortalWifiName().c_str(), SETUP_AP_PASSWORD)) {
-    finalizeWifi();
-  } else {
-    Serial.println("Unable to connect. Womp womp");
-  }
+  setProgram(PROGRAM_WIFI_CONNECTING);
+  finalizeWifi(wifiManager.autoConnect(captivePortalWifiName().c_str(), SETUP_AP_PASSWORD));
 }
 
 void loopWifi() {
