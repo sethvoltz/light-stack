@@ -8,9 +8,9 @@ The core concept for light control is through the use of a pattern, which is eff
 
 ## Controls
 
-All user control of the device is handled over MQTT. At first connection, the device announces that it is online by publishing to the topic `light-stack/<device-id>/identity` where the `<device-id>` is a unique value for that device. Currently the contents of the message don't matter, however the value "online" is currently passed. The controller will then subscribe to a series of topics in the format `<light-stack>/<all|device-id>/<control>`.
+All user control of the device is handled over MQTT. At first connection, the device announces that it is online by publishing to the topic `light-stack/<device-id>/identity` where the `<device-id>` is a unique value for that device and a value of "online". The device also registers an MQTT Last Will and Testament to publish the value "offline" when it disconnects. It also subscribes to the control topic `identify` which will trigger publishing to its identity topic. The controller will then subscribe to a series of topics in the format `<light-stack>/<all|device-id>/<control>`.
 
-The controls are exposed in two ways: pattern definitions and pattern presets. A definition is sent as a JSON document that will be validated and assigned as the current pattern and run. A preset is a hardcoded, named pattern that ships with the firmware. The named presets can also be used as the next value for timed patterns.
+Two controls are exposed: pattern definitions as `definition` and pattern presets as `preset`. A definition is sent as a JSON document that will be validated and assigned as the current pattern and run. A preset is a hardcoded, named pattern that ships with the firmware. The named presets can also be used as the next value for timed patterns.
 
 The firmware, being designed for the ESP32 chipset, also exposes wifi hotspot setup and configuration for MQTT server, port and credentials.
 
@@ -31,6 +31,14 @@ The JSON format for pattern definitions is as follows:
 ```
 
 To specify a `delay` value is "indefinite", use the value `-1`. If a pattern is set as indefinite, the `next_preset` value is ignored and may be set to an empty string.
+
+## Firmware
+
+The light-stack support over the air firmware updates. Navigate to `http://<device-up>/update` to get to the page. It will prompt you for a username and password. The username is `update`, unless changed in code, and the password is configured when performing the initial wifi setup.
+
+New firmware is located at `<project-root>/.pio/build/esp32/firmware.bin` and can be selected from the filesystem or dropped into the browser update page. A progress bar will show the upload and store to flash. After 100% the new firmware will be selected and the device will reboot, at which point you should see the initial wifi and MQTT connectivity status lights before it returns to the default user pattern.
+
+_**Note:** This project uses a custom partition table to expand the available program storage and reduce the SPIFFS partition. This also means it assumes a 4MB cache ESP32 and other flash sizes will likely fail._
 
 ## Hardware
 
