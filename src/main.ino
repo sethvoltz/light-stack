@@ -5,6 +5,7 @@
 // =--------------------------------------------------------------------------------= Libraries =--=
 
 #include <limits.h>
+#include <ESPmDNS.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <WiFiManager.h>
@@ -23,6 +24,8 @@
 // Wifi
 #define SETUP_AP_NAME                 "Setup Light Stack"
 #define SETUP_AP_PASSWORD             "setuplightstack"
+#define MDNS_PREFIX                   "light-stack-"
+#define MDNS_SERVICE_NAME             "light-stack"
 #define WIFI_HOTSPOT_TIMEOUT          180 // Seconds before hotspot ends and attempts reconnect
 
 // MQTT
@@ -505,6 +508,10 @@ void loopButton() {
 void finalizeWifi(boolean connectStatus) {
   if (connectStatus) {
     wifiFeaturesEnabled = true;
+
+    if (WiFi.status() == WL_CONNECTED) {
+      setupMdns();
+    }
   } else {
     wifiFeaturesEnabled = false;
     Serial.println("Failed to connect to wifi and hit timeout.");
@@ -579,6 +586,15 @@ void loopWifi() {
   wifiManager.process();
 }
 
+void setupMdns() {
+  if(!MDNS.begin(String((String(MDNS_PREFIX) + clientId)).c_str())) {
+    Serial.println("Error starting mDNS");
+    return;
+  }
+
+  MDNS.addService("http", "tcp", 80);
+  MDNS.addService(MDNS_SERVICE_NAME, "tcp", 80);
+}
 
 // =------------------------------------------------------------------------------= File System =--=
 
