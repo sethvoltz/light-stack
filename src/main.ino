@@ -1,5 +1,6 @@
 // TODO: Echo or fetch current pattern out to MQTT (convert to JSON)
 // TODO: Improve JSON schema. Check for missing `frames` param, allow missing `delay` to mean indef.
+// TODO: Convert from .ino to .cpp with header .h
 
 // =--------------------------------------------------------------------------------= Libraries =--=
 
@@ -27,10 +28,7 @@
 // MQTT
 #define MQTT_ONLINE_MESSAGE           "online"
 #define MQTT_OFFLINE_MESSAGE          "offline"
-#define MAX_CONNECTION_ATTEMPTS       3 // Number of attempts before fallback
-#define SHORT_CONNECTION_DELAY        3000 // ms Delay between initial connection attempts
-#define LONG_CONNECTION_DELAY         120000 // ms Delay between attempts after max attempts
-#define CONNECTING_BLINK_DELAY        500
+#define MQTT_RECONNECT_DELAY          3000 // ms Delay between initial connection attempts
 #define MQTT_ROOT                     "light-stack"
 #define DEFAULT_MQTT_SERVER           ""
 #define MQTT_SERVER_LENGTH            64
@@ -218,7 +216,7 @@ const char* rootCA = \
 "-----END CERTIFICATE-----\n";
 
 // Client ID
-char client_id[13]; // Don't forget one byte for the terminating NULL...
+char clientId[9]; // Don't forget one byte for the terminating NULL...
 
 // OTA
 char otaPassword[OTA_PASSWORD_LENGTH] = DEFAULT_OTA_PASSWORD;
@@ -230,7 +228,7 @@ mqtt_settings mqttSettings = {
   DEFAULT_MQTT_USERNAME,
   DEFAULT_MQTT_PASSWORD
 };
-int connectionAttempts = 0;
+int lastReconnectAttempt = 0;
 
 // Wifi
 WiFiClientSecure wifiClient;
@@ -249,11 +247,13 @@ OneButton mainButton(MAIN_BUTTON_PIN, true);
 
 // =--------------------------------------------------------------------------------= Utilities =--=
 
+// The ESP32 doesn't have a Chip ID the way that the ESP8266 does, so this makes one out of the low
+// bits of the wifi MAC address. High bits are are left available in case more characters are needed
 void setupClientId() {
   uint64_t mac = ESP.getEfuseMac();
   uint32_t hi = mac >> 32;
   uint32_t lo = mac;
-  snprintf(client_id, 13, "%04x%08x", hi, lo);
+  snprintf(clientId, 9, "%08x", lo);
 }
 
 // On ESP32 this must be run before the Wifi is started at they read from the same analog pins and
@@ -364,7 +364,7 @@ String makeTopic(String suffix, bool all = false) {
   if (all) {
     return String(String(MQTT_ROOT) + "/all/" + suffix);
   }
-  return String(String(MQTT_ROOT) + "/" + client_id + "/" + suffix);
+  return String(String(MQTT_ROOT) + "/" + clientId + "/" + suffix);
 }
 
 String makeTopic(String suffix, String newClientId) {
@@ -392,52 +392,58 @@ void setupMQTT() {
   mqttClient.setServer(mqttSettings.server, port);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(MQTT_MESSAGE_BUFFER_SIZE);
-  connectionAttempts = 0;
+  lastReconnectAttempt = 0;
 }
 
 void loopMQTT() {
   mqttClient.loop();
 }
 
-// Function to connect and reconnect as necessary to the MQTT server.
-// Should be called in the loop function and it will take care if connecting.
-void mqttConnect() {
-  // Loop until we're reconnected
-  while (!mqttClient.connected()) {
-    Serial.printf("MQTT Server: %s@%s:%s\n", mqttSettings.username, mqttSettings.server, mqttSettings.port);
-    Serial.print("Attempting MQTT connection... ");
-    setProgram(PROGRAM_MQTT_CONNECTING);
+boolean mqttConnect() {
+  Serial.printf(
+    "Connecting to MQTT Server: %s@%s:%s\n",
+    mqttSettings.username,
+    mqttSettings.server,
+    mqttSettings.port
+  );
+  setProgram(PROGRAM_MQTT_CONNECTING);
 
-    // Attempt to connect
-    if (mqttClient.connect(
-      client_id,                                  // Unique ID
-      mqttSettings.username,                      // Credentials
-      mqttSettings.password,
-      makeTopic("identity").c_str(),              // Last Will & Testament
-      1,
-      true,
-      MQTT_OFFLINE_MESSAGE
-    )) {
-      Serial.println("connected");
-      setProgram(PROGRAM_USER);
+  if (mqttClient.connect(
+    clientId,
+    mqttSettings.username,
+    mqttSettings.password,
+    makeTopic("identity").c_str(), // Last Will & Testament
+    1,
+    true,
+    MQTT_OFFLINE_MESSAGE
+  )) {
+    Serial.println("MQTT Connected");
+    setProgram(PROGRAM_USER);
 
-      sendIdentity();
+    sendIdentity();
 
-      // Subscribe to topics
-      mqttClient.subscribe(makeTopic("identify", true).c_str());
-      mqttClient.subscribe(makeTopic("preset").c_str());
-      mqttClient.subscribe(makeTopic("preset", true).c_str());
-      mqttClient.subscribe(makeTopic("definition").c_str());
-      mqttClient.subscribe(makeTopic("definition", true).c_str());
-    } else {
-      Serial.print("failed, rc=");
-      Serial.print(mqttClient.state());
-      Serial.println(" try again in 3 seconds");
+    // Subscribe to topics
+    mqttClient.subscribe(makeTopic("identify", true).c_str());
+    mqttClient.subscribe(makeTopic("preset").c_str());
+    mqttClient.subscribe(makeTopic("preset", true).c_str());
+    mqttClient.subscribe(makeTopic("definition").c_str());
+    mqttClient.subscribe(makeTopic("definition", true).c_str());
+  } else {
+    Serial.print("MQTT Connection Failure, rc=");
+    Serial.println(mqttClient.state());
+    setProgram(PROGRAM_MQTT_ERROR);
+  }
 
-      // TODO: This should really be non-blocking
-      // https://github.com/knolleary/pubsubclient/tree/master/examples/mqtt_reconnect_nonblocking
-      // Wait a few seconds before retrying
-      delay(3000);
+  return mqttClient.connected();
+}
+
+void mqttReconnect() {
+  unsigned long now = millis();
+
+  if (now - lastReconnectAttempt > MQTT_RECONNECT_DELAY) {
+    lastReconnectAttempt = now;
+    if (mqttConnect()) {
+      lastReconnectAttempt = 0;
     }
   }
 }
@@ -478,8 +484,7 @@ void buttonClick() {
 
 void buttonLongPress() {
   Serial.println("Button Long Press Start");
-  String setupAPName(String(SETUP_AP_NAME) + " " + client_id);
-  wifiManager.startConfigPortal(setupAPName.c_str(), SETUP_AP_PASSWORD);
+  wifiManager.startConfigPortal(captivePortalWifiName().c_str(), SETUP_AP_PASSWORD);
   finalizeWifi();
 }
 
@@ -548,6 +553,10 @@ void saveConfigCallback() {
   setupMQTT();
 }
 
+String captivePortalWifiName() {
+  return String((String(SETUP_AP_NAME) + " - " + clientId));
+}
+
 void setupWifi() {
   WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
 
@@ -562,12 +571,15 @@ void setupWifi() {
   wifiManager.setAPCallback(configModeCallback);
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
-  String setupAPName(String(SETUP_AP_NAME) + " " + client_id);
-  if (wifiManager.autoConnect(setupAPName.c_str(), SETUP_AP_PASSWORD)) {
+  if (wifiManager.autoConnect(captivePortalWifiName().c_str(), SETUP_AP_PASSWORD)) {
     finalizeWifi();
   } else {
     Serial.println("Unable to connect. Womp womp");
   }
+}
+
+void loopWifi() {
+  wifiManager.process();
 }
 
 
@@ -751,18 +763,15 @@ void setup() {
 }
 
 void loop() {
-  wifiManager.process();
+  loopButton();
+  loopDisplay();
+  loopWifi();
 
   if (wifiFeaturesEnabled) {
     if (mqttClient.connected()) {
       loopMQTT();
     } else {
-      mqttConnect();
+      mqttReconnect();
     }
-  } else {
-    // maybeConnectWifi();
   }
-
-  loopButton();
-  loopDisplay();
 }
