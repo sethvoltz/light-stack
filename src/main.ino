@@ -42,6 +42,11 @@
 #define MQTT_PASSWORD_LENGTH          32
 #define MQTT_MESSAGE_BUFFER_SIZE      3072
 
+// OTA
+#define OTA_USERNAME                  "update"
+#define OTA_PASSWORD_LENGTH           32
+#define DEFAULT_OTA_PASSWORD          "light-stack"
+
 // Buttons
 #define MAIN_BUTTON_PIN               22
 
@@ -215,6 +220,9 @@ const char* rootCA = \
 // Client ID
 char client_id[13]; // Don't forget one byte for the terminating NULL...
 
+// OTA
+char otaPassword[OTA_PASSWORD_LENGTH] = DEFAULT_OTA_PASSWORD;
+
 // MQTT
 mqtt_settings mqttSettings = {
   DEFAULT_MQTT_SERVER,
@@ -231,6 +239,7 @@ WiFiManagerParameter config_mqtt_server("server", "MQTT Server", mqttSettings.se
 WiFiManagerParameter config_mqtt_port("port", "MQTT Port", mqttSettings.port, MQTT_PORT_LENGTH);
 WiFiManagerParameter config_mqtt_username("username", "MQTT Username", mqttSettings.username, MQTT_USERNAME_LENGTH);
 WiFiManagerParameter config_mqtt_password("password", "MQTT Password", mqttSettings.password, MQTT_PASSWORD_LENGTH);
+WiFiManagerParameter config_ota_password("otaPassword", "OTA Password", otaPassword, OTA_PASSWORD_LENGTH);
 bool wifiFeaturesEnabled = false;
 PubSubClient mqttClient(wifiClient);
 
@@ -517,6 +526,7 @@ void saveConfigCallback() {
   strcpy(mqttSettings.port, config_mqtt_port.getValue());
   strcpy(mqttSettings.username, config_mqtt_username.getValue());
   strcpy(mqttSettings.password, config_mqtt_password.getValue());
+  strcpy(otaPassword, config_ota_password.getValue());
 
   Serial.println("Saving config...");
   DynamicJsonDocument jsonDocument(1000);
@@ -524,6 +534,7 @@ void saveConfigCallback() {
   jsonDocument["mqtt_port"] = mqttSettings.port;
   jsonDocument["mqtt_username"] = mqttSettings.username;
   jsonDocument["mqtt_password"] = mqttSettings.password;
+  jsonDocument["ota_password"] = otaPassword;
 
   File configFile = SPIFFS.open("/config.json", "w");
   if (!configFile) {
@@ -544,6 +555,7 @@ void setupWifi() {
   wifiManager.addParameter(&config_mqtt_port);
   wifiManager.addParameter(&config_mqtt_username);
   wifiManager.addParameter(&config_mqtt_password);
+  wifiManager.addParameter(&config_ota_password);
 
   wifiManager.setConfigPortalTimeout(WIFI_HOTSPOT_TIMEOUT);
   wifiManager.setConfigPortalBlocking(false);
@@ -588,6 +600,7 @@ void setupFileSystem() {
           strcpy(mqttSettings.port, settingsDocument["mqtt_port"]);
           strcpy(mqttSettings.username, settingsDocument["mqtt_username"]);
           strcpy(mqttSettings.password, settingsDocument["mqtt_password"]);
+          strcpy(otaPassword, settingsDocument["ota_password"]);
         } else {
           Serial.println("Failed to load json config");
         }
@@ -714,9 +727,9 @@ void setDefinition(String definition) {
 
 void setupOTA() {
   webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "Hi! I am ESP32.");
+    request->send(200, "text/plain", "Got to /update for firmware updates.");
   });
-  AsyncElegantOTA.begin(&webServer);
+  AsyncElegantOTA.begin(&webServer, OTA_USERNAME, otaPassword);
   webServer.begin();
   Serial.println("HTTP server started.");
 }
