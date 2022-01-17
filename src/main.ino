@@ -251,7 +251,7 @@ OneButton mainButton(MAIN_BUTTON_PIN, true);
 // bits of the wifi MAC address. High bits are are left available in case more characters are needed
 void setupClientId() {
   uint64_t mac = ESP.getEfuseMac();
-  uint32_t hi = mac >> 32;
+  // uint32_t hi = mac >> 32;
   uint32_t lo = mac;
   snprintf(clientId, 9, "%08x", lo);
 }
