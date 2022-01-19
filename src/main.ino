@@ -278,6 +278,26 @@ void setupRandom() {
 }
 
 
+// =---------------------------------------------------------------------------= MQTT Utilities =--=
+
+// Turn a topic suffix into a full MQTT topic within the defined namespace
+String makeTopic(String suffix, bool all = false) {
+  if (all) {
+    return String(String(MQTT_ROOT) + "/all/" + suffix);
+  }
+  return String(String(MQTT_ROOT) + "/" + clientId + "/" + suffix);
+}
+
+String makeTopic(String suffix, String newClientId) {
+  return String(String(MQTT_ROOT) + "/" + newClientId + "/" + suffix);
+}
+
+// Check if a given topic containes the suffix and is for this or all nodes
+bool topicMatch(String topic, String suffix) {
+  return topic.equals(makeTopic(suffix)) || topic.equals(makeTopic(suffix, true));
+}
+
+
 // =----------------------------------------------------------------------------------= Display =--=
 
 void setLights(pattern_frame frame) {
@@ -285,6 +305,17 @@ void setLights(pattern_frame frame) {
   digitalWrite(LED_RED_PIN, frame.red_state);
   digitalWrite(LED_AMBER_PIN, frame.amber_state);
   digitalWrite(LED_GREEN_PIN, frame.green_state);
+
+  if (mqttClient.connected()) {
+    StaticJsonDocument<200> messageJson;
+    messageJson["red"] = frame.red_state;
+    messageJson["amber"] = frame.amber_state;
+    messageJson["green"] = frame.green_state;
+
+    char message[200];
+    size_t messageLength = serializeJson(messageJson, message);
+    mqttClient.publish(makeTopic("state").c_str(), message, messageLength);
+  }
 }
 
 void runPattern(stack_pattern pattern, stack_state& state, bool init = false) {
@@ -357,26 +388,6 @@ void programMqttError(bool init) {
 void programUser(bool init) {
   static stack_state state;
   runPattern(currentUserPattern, state, init);
-}
-
-
-// =---------------------------------------------------------------------------= MQTT Utilities =--=
-
-// Turn a topic suffix into a full MQTT topic for the centerpiece namespace
-String makeTopic(String suffix, bool all = false) {
-  if (all) {
-    return String(String(MQTT_ROOT) + "/all/" + suffix);
-  }
-  return String(String(MQTT_ROOT) + "/" + clientId + "/" + suffix);
-}
-
-String makeTopic(String suffix, String newClientId) {
-  return String(String(MQTT_ROOT) + "/" + newClientId + "/" + suffix);
-}
-
-// Check if a given topic containes the suffix and is for this or all nodes
-bool topicMatch(String topic, String suffix) {
-  return topic.equals(makeTopic(suffix)) || topic.equals(makeTopic(suffix, true));
 }
 
 
@@ -472,8 +483,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void sendIdentity() {
   mqttClient.publish(
     makeTopic("identity").c_str(),
-    (const uint8_t*) MQTT_ONLINE_MESSAGE,
-    strlen(MQTT_ONLINE_MESSAGE),
+    MQTT_ONLINE_MESSAGE,
     true
   );
 }
