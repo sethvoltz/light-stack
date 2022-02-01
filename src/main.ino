@@ -1,5 +1,4 @@
 // TODO: Echo or fetch current pattern out to MQTT (convert to JSON)
-// TODO: Improve JSON schema. Check for missing `frames` param, allow missing `delay` to mean indef.
 // TODO: Convert from .ino to .cpp with header .h
 
 // =--------------------------------------------------------------------------------= Libraries =--=
@@ -725,12 +724,22 @@ void setDefinition(String definition) {
 
   stack_pattern pattern;
 
+  if (!doc.containsKey("frames") || doc["frames"].as<JsonArray>().size() == 0) {
+    Serial.println("Frames definition missing or empty! Cancelling.");
+    return;
+  }
+  
   uint8_t index = 0;
   for (JsonObject frame : doc["frames"].as<JsonArray>()) {
     pattern.frames[index].red_state = frame["red"];
     pattern.frames[index].amber_state = frame["amber"];
     pattern.frames[index].green_state = frame["green"];
-    pattern.frames[index].delay_ms = frame["delay"] == -1 ? ULONG_MAX : frame["delay"];
+
+    if (!frame.containsKey("delay") || frame["delay"] == -1) {
+      pattern.frames[index].delay_ms = ULONG_MAX;  
+    } else {
+      pattern.frames[index].delay_ms = frame["delay"];
+    }
     index++;
 
     if (index > PATTERN_FRAME_MAX) {
@@ -740,11 +749,17 @@ void setDefinition(String definition) {
   }
 
   pattern.num_frames = index;
-  if (doc["delay"] == -1) {
+  if (!doc.containsKey("delay") || doc["delay"] == -1) {
     pattern.delay_ms = ULONG_MAX;
     pattern.next_preset = 0;
   } else {
     pattern.delay_ms = doc["delay"];
+
+    if (!doc.containsKey("next_preset")) {
+      Serial.println("Missing next preset! Cancelling.");
+      return;
+    }
+
     int preset = getPresetId(doc["next_preset"]);
     if (preset < 0) {
       Serial.println("Unknown preset! Cancelling.");
