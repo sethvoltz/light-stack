@@ -1,4 +1,3 @@
-// TODO: Echo or fetch current pattern out to MQTT (convert to JSON)
 // TODO: Convert from .ino to .cpp with header .h
 
 // =--------------------------------------------------------------------------------= Libraries =--=
@@ -305,16 +304,15 @@ void setLights(pattern_frame frame) {
   digitalWrite(LED_AMBER_PIN, frame.amber_state);
   digitalWrite(LED_GREEN_PIN, frame.green_state);
 
-  if (mqttClient.connected()) {
-    StaticJsonDocument<200> messageJson;
-    messageJson["red"] = frame.red_state;
-    messageJson["amber"] = frame.amber_state;
-    messageJson["green"] = frame.green_state;
+  // Send current state
+  StaticJsonDocument<200> messageJson;
+  messageJson["red"] = frame.red_state;
+  messageJson["amber"] = frame.amber_state;
+  messageJson["green"] = frame.green_state;
 
-    char message[200];
-    size_t messageLength = serializeJson(messageJson, message);
-    mqttClient.publish(makeTopic("state").c_str(), message, messageLength);
-  }
+  char message[200];
+  size_t messageLength = serializeJson(messageJson, message);
+  mqttClient.publish(makeTopic("state").c_str(), message, messageLength);
 }
 
 void runPattern(stack_pattern pattern, stack_state& state, bool init = false) {
@@ -671,6 +669,9 @@ void setProgram(uint8_t program) {
     currentProgram = program;
     Serial.printf("Setting program to %s\n", programNames[program]);
     loopDisplay(true);
+
+    // Current program name
+    mqttClient.publish(makeTopic("program").c_str(), programNames[program]);
   }
 }
 
@@ -681,6 +682,33 @@ void setProgram(String programName) {
       break;
     }
   }
+}
+
+void setPattern(stack_pattern pattern) {
+  currentUserPattern = pattern;
+  loopDisplay(true);
+
+  // Encode and send current pattern
+  DynamicJsonDocument messageJson(MQTT_MESSAGE_BUFFER_SIZE);
+  JsonArray frames = messageJson.createNestedArray("frames");
+  for (size_t index = 0; index < pattern.num_frames; index++) {
+    JsonObject frame = frames.createNestedObject();
+    frame["red"] = pattern.frames[index].red_state;
+    frame["amber"] = pattern.frames[index].amber_state;
+    frame["green"] = pattern.frames[index].green_state;
+    if (pattern.frames[index].delay_ms != ULONG_MAX) {
+      frame["delay"] = pattern.frames[index].delay_ms;
+    }
+  }
+  
+  if (pattern.delay_ms != ULONG_MAX) {
+    messageJson["delay"] = pattern.delay_ms;
+    messageJson["next_preset"] = presetNames[pattern.next_preset];
+  }
+  
+  char message[MQTT_MESSAGE_BUFFER_SIZE];
+  size_t messageLength = serializeJson(messageJson, message);
+  mqttClient.publish(makeTopic("pattern").c_str(), message, messageLength);
 }
 
 bool isValidPresetId(uint8_t preset) {
@@ -699,8 +727,7 @@ int getPresetId(const char *presetName) {
 void setPreset(uint8_t preset) {
   if (isValidPresetId(preset)) {
     Serial.printf("Setting preset to %s\n", presetNames[preset]);
-    currentUserPattern = presetList[preset];
-    loopDisplay(true);
+    setPattern(presetList[preset]);
   }
 }
 
@@ -768,9 +795,8 @@ void setDefinition(String definition) {
     pattern.next_preset = preset;
   }
 
-  currentUserPattern = pattern;
-  loopDisplay(true);
-} 
+  setPattern(pattern);
+}
 
 
 /*=-------------------------------------------------------------------------------------= OTA =--=*/
